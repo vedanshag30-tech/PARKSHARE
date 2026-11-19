@@ -1,0 +1,1188 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ParkShare & AutoCare | P2P Smart Parking & Map Navigation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- Leaflet Map CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: { 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca' },
+            darkBg: '#080c15',
+            cardBg: '#0f172a',
+            surface: '#131d31'
+          },
+          animation: {
+            'road-dash': 'roadDash 0.8s linear infinite',
+            'car-rumble': 'carRumble 0.4s ease-in-out infinite alternate',
+            'radar-pulse': 'radarPulse 2.5s cubic-bezier(0, 0, 0.2, 1) infinite',
+            'glow-float': 'glowFloat 3s ease-in-out infinite alternate'
+          },
+          keyframes: {
+            roadDash: { '0%': { transform: 'translateX(0)' }, '100%': { transform: 'translateX(-48px)' } },
+            carRumble: { '0%': { transform: 'translateY(0px)' }, '100%': { transform: 'translateY(-1.5px)' } },
+            radarPulse: { '0%': { transform: 'scale(0.9)', opacity: '1' }, '100%': { transform: 'scale(2.2)', opacity: '0' } },
+            glowFloat: { '0%': { transform: 'translateY(0)' }, '100%': { transform: 'translateY(-6px)' } }
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700&display=swap');
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #080c15; }
+    .font-mono-code { font-family: 'JetBrains Mono', monospace; }
+    .headlight-cone {
+      background: radial-gradient(ellipse at left, rgba(254, 240, 138, 0.45) 0%, rgba(254, 240, 138, 0.08) 65%, transparent 80%);
+      filter: blur(5px);
+    }
+    .road-stripes {
+      background-image: repeating-linear-gradient(90deg, #94a3b8 0px, #94a3b8 28px, transparent 28px, transparent 56px);
+    }
+    .leaflet-tile {
+      filter: brightness(0.65) invert(1) contrast(3) hue-rotate(200deg) saturate(0.3) brightness(0.75);
+    }
+    .leaflet-container {
+      background: #090d16;
+      border-radius: 1rem;
+    }
+  </style>
+</head>
+<body class="bg-darkBg text-slate-200 min-h-screen flex flex-col selection:bg-indigo-500 selection:text-white overflow-x-hidden">
+
+  <!-- TOP NAVIGATION -->
+  <header id="app-header" class="hidden bg-slate-900/90 backdrop-blur-md border-b border-slate-800/80 sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="handleSignOut()">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-indigo-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/25 border border-indigo-400/30">
+          <i class="fa-solid fa-square-parking text-xl"></i>
+        </div>
+        <div>
+          <div class="flex items-center gap-2">
+            <span class="text-base font-bold text-white tracking-tight">ParkShare</span>
+            <span class="text-[9px] font-mono-code px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 uppercase">Maps GPS Active</span>
+          </div>
+          <span id="header-role-badge" class="text-[10px] uppercase font-bold tracking-wider text-indigo-400 block leading-none mt-0.5">Vehicle Owner</span>
+        </div>
+      </div>
+
+      <div id="portal-nav-tabs" class="flex items-center gap-1.5 bg-slate-800/80 border border-slate-700/60 p-1 rounded-xl"></div>
+
+      <div class="flex items-center gap-3">
+        <div class="text-right hidden sm:block">
+          <div id="header-user-name" class="text-xs font-bold text-slate-100 flex items-center justify-end gap-1.5">
+            <span>User</span>
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          </div>
+          <div id="header-user-contact" class="text-[10px] text-slate-400 font-mono-code">+91 9876543210</div>
+        </div>
+        <button onclick="handleSignOut()" class="px-3 py-1.5 rounded-lg border border-slate-700/80 bg-slate-800/50 hover:bg-rose-500/10 hover:border-rose-500/40 text-xs font-semibold text-slate-300 hover:text-rose-400 transition flex items-center gap-1.5">
+          <i class="fa-solid fa-arrow-right-from-bracket text-xs"></i>
+          <span>Switch Profile</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- MAIN CONTENT AREA -->
+  <main class="flex-1 w-full flex flex-col items-center justify-center relative">
+    <div class="absolute -top-32 -left-32 w-96 h-96 bg-indigo-600/15 rounded-full blur-[130px] pointer-events-none"></div>
+    <div class="absolute -bottom-32 -right-32 w-96 h-96 bg-cyan-600/15 rounded-full blur-[130px] pointer-events-none"></div>
+
+    <!-- STAGE 1: WELCOME HERO -->
+    <div id="stage-welcome" class="w-full max-w-5xl mx-auto px-4 py-8 flex flex-col items-center text-center relative z-10">
+      <div class="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-slate-800/90 border border-indigo-500/40 text-xs text-indigo-300 mb-6 shadow-lg shadow-indigo-500/10 backdrop-blur-sm animate-glow-float">
+        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-ping"></span>
+        <span class="font-medium">Direct GPS-Guided P2P Parking & Care</span>
+        <i class="fa-solid fa-map-location-dot text-cyan-400 text-xs ml-1"></i>
+      </div>
+
+      <h1 class="text-3xl sm:text-6xl font-extrabold text-white tracking-tight max-w-3xl leading-[1.15]">
+        Private driveways on demand. <br>
+        <span class="bg-gradient-to-r from-indigo-400 via-cyan-400 to-emerald-400 bg-clip-text text-transparent">Park safely near your destination.</span>
+      </h1>
+      
+      <p class="text-sm sm:text-base text-slate-400 max-w-xl mt-4 mb-8 leading-relaxed">
+        Locate verified parking bays right by you on Google Maps. Pay 25% to hold the bay, verify Aadhaar with OTP, and get turn-by-turn guidance.
+      </p>
+
+      <div class="w-full max-w-3xl bg-slate-900/90 border border-slate-800 rounded-3xl p-5 mb-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-slate-800 text-[11px] font-mono-code text-slate-400">
+          <div class="flex items-center gap-2">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-slate-200">MAP ENGINE: <span class="text-emerald-400">GEO-SATELLITE SYNCED</span></span>
+          </div>
+          <div class="flex items-center gap-3 text-cyan-400">
+            <i class="fa-solid fa-location-crosshairs animate-spin"></i>
+            <span>RADIUS: 5 KM ACTIVE</span>
+          </div>
+        </div>
+
+        <div class="relative w-full h-44 bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 rounded-2xl overflow-hidden border border-slate-800 flex items-center justify-between px-4 sm:px-10">
+          <div class="absolute inset-0 opacity-20 bg-[radial-gradient(#6366f1_1px,transparent_1px)] [background-size:16px_16px]"></div>
+          <div class="absolute w-[200%] h-1 road-stripes top-1/2 -translate-y-1/2 animate-road-dash opacity-60"></div>
+
+          <div class="relative flex items-center animate-car-rumble z-20">
+            <div class="absolute left-28 -top-8 w-44 h-24 headlight-cone pointer-events-none"></div>
+            <svg class="w-36 sm:w-44 h-auto drop-shadow-[0_10px_15px_rgba(99,102,241,0.3)]" viewBox="0 0 320 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M40 75 L90 75 L120 35 L220 35 L260 65 L290 70 L300 85 L20 85 Z" fill="#4338ca"/>
+              <path d="M50 72 L95 72 L125 38 L215 38 L250 65 L285 70 L295 82 L25 82 Z" fill="#6366f1"/>
+              <path d="M125 40 L165 40 L165 65 L105 65 Z" fill="#06b6d4" opacity="0.65"/>
+              <path d="M175 40 L212 40 L242 65 L175 65 Z" fill="#06b6d4" opacity="0.65"/>
+              <path d="M285 72 L300 75 L285 78 Z" fill="#fef08a"/>
+              <path d="M22 72 L26 72 L26 78 L22 78 Z" fill="#ef4444"/>
+              <circle cx="240" cy="85" r="22" fill="#0f172a" stroke="#334155" stroke-width="4"/>
+              <circle cx="240" cy="85" r="10" fill="#6366f1"/>
+              <circle cx="80" cy="85" r="22" fill="#0f172a" stroke="#334155" stroke-width="4"/>
+              <circle cx="80" cy="85" r="10" fill="#6366f1"/>
+            </svg>
+          </div>
+
+          <div class="hidden sm:flex flex-col items-center z-20">
+            <div class="w-10 h-10 rounded-full bg-indigo-500/20 border border-indigo-400 text-indigo-300 flex items-center justify-center text-sm shadow-lg shadow-indigo-500/20">
+              <i class="fa-solid fa-handshake"></i>
+            </div>
+            <span class="text-[9px] font-mono-code text-cyan-300 mt-1 uppercase font-bold">Safe Lock</span>
+          </div>
+
+          <div class="relative flex items-center gap-3 z-20">
+            <svg class="w-20 sm:w-24 h-auto drop-shadow-lg" viewBox="0 0 140 180" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="50" width="35" height="120" rx="4" fill="#1e293b" stroke="#334155" stroke-width="3"/>
+              <line x1="2" y1="80" x2="37" y2="80" stroke="#475569" stroke-width="2"/>
+              <line x1="2" y1="120" x2="37" y2="120" stroke="#475569" stroke-width="2"/>
+              <circle cx="95" cy="40" r="18" fill="#fbcfe8"/>
+              <path d="M85 30 Q95 20 108 30 Z" fill="#334155"/>
+              <rect x="75" y="60" width="40" height="60" rx="10" fill="#10b981"/>
+              <rect x="80" y="120" width="12" height="50" rx="5" fill="#1e293b"/>
+              <rect x="98" y="120" width="12" height="50" rx="5" fill="#1e293b"/>
+              <path d="M75 70 L55 90" stroke="#fbcfe8" stroke-width="6" stroke-linecap="round"/>
+              <circle cx="52" cy="94" r="5" fill="#f59e0b"/>
+            </svg>
+            <div class="text-left hidden sm:block">
+              <span class="text-[9px] font-mono-code uppercase font-bold text-emerald-400 block tracking-wider">HOST ON SITE</span>
+              <span class="text-xs font-bold text-white leading-tight">BAY-101 VERIFIED</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-slate-800 text-center">
+          <div>
+            <div class="text-base sm:text-lg font-extrabold text-white font-mono-code">14,820+</div>
+            <div class="text-[10px] text-slate-400">Drivers Parked</div>
+          </div>
+          <div>
+            <div class="text-base sm:text-lg font-extrabold text-amber-400 font-mono-code flex items-center justify-center gap-1">
+              <span>4.9</span> <i class="fa-solid fa-star text-xs"></i>
+            </div>
+            <div class="text-[10px] text-slate-400">Driver Rating</div>
+          </div>
+          <div>
+            <div class="text-base sm:text-lg font-extrabold text-emerald-400 font-mono-code">99.4%</div>
+            <div class="text-[10px] text-slate-400">Spot Assurance</div>
+          </div>
+        </div>
+      </div>
+
+      <button onclick="openCreateAccountModal()" class="px-8 py-4 bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-500 hover:from-indigo-500 hover:to-cyan-400 text-white font-bold text-sm rounded-2xl transition duration-300 shadow-xl shadow-indigo-600/30 flex items-center gap-3 group">
+        <span>Enter ParkShare Network</span>
+        <i class="fa-solid fa-arrow-right text-xs group-hover:translate-x-1 transition-transform"></i>
+      </button>
+
+      <div class="flex flex-wrap items-center justify-center gap-6 mt-8 text-xs text-slate-400">
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-map-pin text-cyan-400"></i> Google Maps Supported</span>
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-shield-halved text-emerald-400"></i> UIDAI Aadhaar e-KYC</span>
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-id-card text-indigo-400"></i> DL RTO Verification</span>
+        <span class="flex items-center gap-1.5"><i class="fa-solid fa-rotate-left text-amber-400"></i> 45-Min Grace Refund</span>
+      </div>
+    </div>
+
+    <!-- STAGE 2: ROLE SELECTION -->
+    <div id="stage-role-select" class="w-full max-w-xl mx-auto px-4 py-12 hidden">
+      <div class="text-center mb-8">
+        <span class="text-xs uppercase font-extrabold tracking-wider text-indigo-400 block mb-1">
+          Welcome, <span id="welcome-username" class="text-white">User</span>!
+        </span>
+        <h2 class="text-2xl font-bold text-white">Select Your Portal</h2>
+        <p class="text-xs text-slate-400 mt-1">Choose how you wish to operate in the ParkShare network today.</p>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <button onclick="selectRole('host')" class="group p-6 bg-slate-900/90 hover:bg-slate-800 border-2 border-slate-800 hover:border-indigo-500 rounded-3xl text-left transition duration-300 shadow-xl flex flex-col justify-between">
+          <div>
+            <div class="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/30 text-indigo-400 group-hover:bg-indigo-600 group-hover:text-white flex items-center justify-center text-xl transition mb-4">
+              <i class="fa-solid fa-house-chimney-user"></i>
+            </div>
+            <h3 class="text-base font-bold text-white group-hover:text-indigo-400 transition">Parking Bay Owner</h3>
+            <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+              List idle driveways or lots with GPS pin placement. Specify free hours, offer car detailing, and collect remaining 75% on check-in.
+            </p>
+          </div>
+          <div class="mt-6 flex items-center gap-1.5 text-xs font-bold text-indigo-400 group-hover:translate-x-1 transition-transform">
+            <span>Open Host Portal</span>
+            <i class="fa-solid fa-arrow-right text-[10px]"></i>
+          </div>
+        </button>
+
+        <button onclick="selectRole('driver')" class="group p-6 bg-slate-900/90 hover:bg-slate-800 border-2 border-slate-800 hover:border-emerald-500 rounded-3xl text-left transition duration-300 shadow-xl flex flex-col justify-between">
+          <div>
+            <div class="w-12 h-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 group-hover:bg-emerald-600 group-hover:text-white flex items-center justify-center text-xl transition mb-4">
+              <i class="fa-solid fa-car"></i>
+            </div>
+            <h3 class="text-base font-bold text-white group-hover:text-emerald-400 transition">Driver / Vehicle Owner</h3>
+            <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+              Locate the nearest parking bays on an interactive map. Pay 25% advance, navigate via Google Maps, and manage active passes.
+            </p>
+          </div>
+          <div class="mt-6 flex items-center gap-1.5 text-xs font-bold text-emerald-400 group-hover:translate-x-1 transition-transform">
+            <span>Find & Book Bays</span>
+            <i class="fa-solid fa-arrow-right text-[10px]"></i>
+          </div>
+        </button>
+      </div>
+    </div>
+
+    <!-- STAGE 3A: DRIVER PORTAL -->
+    <div id="stage-driver-portal" class="w-full max-w-6xl mx-auto px-4 py-6 hidden space-y-6">
+      <div id="driver-tab-find" class="space-y-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h1 class="text-xl font-bold text-white">Find Nearest Parking Bays</h1>
+            <p class="text-xs text-slate-400">Lock your bay with 25% advance. Remaining 75% settled securely upon parking.</p>
+          </div>
+          <button onclick="locateDriverNearest()" class="px-4 py-2.5 bg-emerald-600/20 hover:bg-emerald-600/30 border border-emerald-500/40 text-emerald-300 rounded-xl text-xs font-semibold flex items-center gap-2 transition">
+            <i class="fa-solid fa-crosshairs text-sm text-emerald-400"></i>
+            <span>Locate Me & Find Nearest Bay</span>
+          </button>
+        </div>
+
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-4 shadow-lg backdrop-blur-md">
+          <div class="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+            <div class="sm:col-span-5">
+              <label class="block text-[11px] font-semibold text-slate-400 mb-1">Filter by Area / Locality</label>
+              <div class="relative">
+                <i class="fa-solid fa-location-dot absolute left-3 top-3 text-slate-500 text-xs"></i>
+                <select id="filter-area" onchange="applyFilters()" class="w-full text-xs pl-8 pr-3 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 focus:outline-none focus:border-indigo-500">
+                  <option value="ALL">All Available Localities</option>
+                  <option value="Indiranagar">Indiranagar, Bengaluru</option>
+                  <option value="Koramangala">Koramangala, Bengaluru</option>
+                  <option value="Whitefield">Whitefield, Bengaluru</option>
+                  <option value="Sector 29">Sector 29, Gurugram</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="sm:col-span-5">
+              <label class="block text-[11px] font-semibold text-slate-400 mb-1">Check by 6-Digit Pincode</label>
+              <div class="relative">
+                <i class="fa-solid fa-map-pin absolute left-3 top-3 text-slate-500 text-xs"></i>
+                <input type="text" id="filter-pincode" maxlength="6" oninput="applyFilters()" placeholder="e.g., 560038 or 122001" class="w-full text-xs pl-8 pr-3 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-slate-200 font-mono-code focus:outline-none focus:border-indigo-500">
+              </div>
+            </div>
+
+            <div class="sm:col-span-2 sm:self-end">
+              <button onclick="resetFilters()" class="w-full py-2.5 text-xs font-semibold rounded-xl border border-slate-700 bg-slate-800 hover:bg-slate-700 text-slate-300 transition">
+                <i class="fa-solid fa-rotate-right mr-1"></i> Reset
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-3">
+          <div class="flex items-center justify-between text-xs">
+            <span class="font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-map-marked-alt text-indigo-400"></i> Live Satellite & Radar Map View
+            </span>
+            <span id="map-status-label" class="text-[11px] text-cyan-400 font-mono-code">Click any pin on map to view bay</span>
+          </div>
+          <div id="driver-map" class="w-full h-80 rounded-2xl border border-slate-800 relative z-10"></div>
+        </div>
+
+        <div id="spots-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5"></div>
+      </div>
+
+      <div id="driver-tab-bookings" class="max-w-2xl mx-auto space-y-4 hidden">
+        <div class="flex justify-between items-center mb-1">
+          <h2 class="text-base font-bold text-white">My Active Reservations</h2>
+          <span class="text-xs text-slate-400">Live booking credentials</span>
+        </div>
+
+        <div class="bg-amber-500/10 border border-amber-500/30 p-4 rounded-2xl text-xs text-amber-200 leading-relaxed">
+          <p class="font-bold flex items-center gap-1.5 text-amber-300 mb-1">
+            <i class="fa-solid fa-circle-exclamation"></i> Cancellation Refund Guarantee:
+          </p>
+          <ul class="list-disc list-inside space-y-0.5 text-[11px] text-amber-300/80">
+            <li><strong>Full 100% Refund:</strong> Cancel within 45 minutes of booking creation AND at least 1 hour before scheduled start time.</li>
+            <li><strong>25% Advance Retained:</strong> If canceled after 45 mins of booking OR within 1 hour of parking time. Balance 75% is voided.</li>
+          </ul>
+        </div>
+
+        <div id="driver-bookings-list" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- STAGE 3B: HOST PORTAL -->
+    <div id="stage-host-portal" class="w-full max-w-5xl mx-auto px-4 py-6 hidden space-y-6">
+      <div id="host-tab-dashboard" class="space-y-6">
+        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
+          <div>
+            <h1 class="text-xl font-bold text-white">Owner Operations Center</h1>
+            <p class="text-xs text-slate-400">Manage your parking slots, view incoming drivers, and monitor payment collections.</p>
+          </div>
+          <button onclick="switchHostTab('register')" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2.5 rounded-xl transition shadow-lg shadow-indigo-600/20 flex items-center gap-1.5">
+            <i class="fa-solid fa-plus"></i> List New Bay
+          </button>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl shadow-sm">
+            <span class="text-xs text-slate-400 font-medium">Your Active Bays</span>
+            <div id="stat-bays-count" class="text-2xl font-bold text-white font-mono-code mt-1">0</div>
+          </div>
+          <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl shadow-sm">
+            <span class="text-xs text-slate-400 font-medium">Driver Reservations</span>
+            <div id="stat-bookings-count" class="text-2xl font-bold text-indigo-400 font-mono-code mt-1">0</div>
+          </div>
+          <div class="bg-slate-900/80 border border-slate-800 p-4 rounded-2xl shadow-sm">
+            <span class="text-xs text-slate-400 font-medium">25% Advance Settled</span>
+            <div id="stat-revenue" class="text-2xl font-bold text-emerald-400 font-mono-code mt-1">₹0</div>
+          </div>
+        </div>
+
+        <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-sm space-y-3">
+          <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider mb-2">Driver Arrivals & Balances Due</h3>
+          <div id="host-bookings-table" class="space-y-3"></div>
+        </div>
+      </div>
+
+      <div id="host-tab-register" class="max-w-2xl mx-auto hidden">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-3xl p-6 shadow-2xl backdrop-blur-md space-y-5">
+          <div class="border-b border-slate-800 pb-4">
+            <h2 class="text-base font-bold text-white">List a New Parking Bay with Map Location</h2>
+            <p class="text-xs text-slate-400">Pin your bay accurately on the map to guide drivers right to your spot.</p>
+          </div>
+
+          <form id="host-bay-form" onsubmit="handleCreateSpot(event)" class="space-y-4">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Spot Identifier / Bay Code</label>
+              <input type="text" id="bay-code" placeholder="e.g., BAY-901" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white font-mono-code focus:border-indigo-500">
+            </div>
+
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">Full Property Address</label>
+              <input type="text" id="bay-address" placeholder="e.g., 42, 100ft Road, Near Metro Pillar 12" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:border-indigo-500">
+            </div>
+
+            <div class="space-y-2">
+              <div class="flex justify-between items-center text-xs">
+                <label class="font-semibold text-slate-300">Set Exact Bay Coordinates on Map</label>
+                <span class="text-[11px] font-mono-code text-cyan-400" id="host-coords-label">Click map to adjust pin</span>
+              </div>
+              <div id="host-map" class="w-full h-56 rounded-xl border border-slate-700 relative z-10"></div>
+              <input type="hidden" id="bay-lat" value="12.9716">
+              <input type="hidden" id="bay-lng" value="77.5946">
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Area / Locality</label>
+                <input type="text" id="bay-area" placeholder="e.g., Indiranagar" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:border-indigo-500">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">6-Digit Pincode</label>
+                <input type="text" id="bay-pincode" pattern="[0-9]{6}" maxlength="6" placeholder="560038" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white font-mono-code focus:border-indigo-500">
+              </div>
+            </div>
+
+            <div class="p-3.5 bg-slate-800/60 border border-slate-700 rounded-xl space-y-2">
+              <span class="text-xs font-bold text-white block">Daily Available Free Hours</span>
+              <div class="grid grid-cols-2 gap-3">
+                <div>
+                  <label class="block text-[11px] text-slate-400 mb-1">Available From</label>
+                  <input type="time" id="bay-time-from" value="08:00" required class="w-full text-xs px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-white">
+                </div>
+                <div>
+                  <label class="block text-[11px] text-slate-400 mb-1">Available Till</label>
+                  <input type="time" id="bay-time-to" value="22:00" required class="w-full text-xs px-3 py-2 rounded-lg border border-slate-700 bg-slate-800 text-white">
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Hourly Tariff (₹)</label>
+                <input type="number" id="bay-rate" placeholder="50" min="10" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white font-mono-code focus:border-indigo-500">
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-300 mb-1">Bay Type</label>
+                <select id="bay-type" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:border-indigo-500">
+                  <option value="Covered Garage">Covered Garage</option>
+                  <option value="Open Driveway">Open Driveway</option>
+                  <option value="Basement Stilt">Basement Stilt</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="p-3 bg-slate-800/80 border border-slate-700 rounded-xl flex items-center justify-between">
+              <div>
+                <span class="text-xs font-semibold text-white block">Provide Car Wash & Detailing Service?</span>
+                <span class="text-[11px] text-slate-400">Offer foam wash to parking drivers for +₹199</span>
+              </div>
+              <input type="checkbox" id="bay-has-wash" checked class="w-5 h-5 accent-indigo-500 rounded cursor-pointer">
+            </div>
+
+            <div class="p-4 bg-slate-800/80 border border-slate-700 rounded-2xl space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <i class="fa-solid fa-id-card text-indigo-400"></i> Owner Aadhaar e-KYC Verification
+                </span>
+                <span id="host-aadhaar-badge" class="text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded">OTP Required</span>
+              </div>
+
+              <div>
+                <label class="block text-[11px] font-medium text-slate-400 mb-1">12-Digit Aadhaar Number</label>
+                <div class="flex gap-2">
+                  <input type="text" id="host-aadhaar-num" pattern="[0-9]{12}" maxlength="12" placeholder="12-digit Aadhaar" required class="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white font-mono-code focus:border-indigo-500">
+                  <button type="button" onclick="sendHostAadhaarOtp()" id="btn-host-aadhaar-otp" class="text-xs font-semibold px-3 py-2 bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 rounded-xl hover:bg-indigo-500/30 whitespace-nowrap">
+                    Send OTP
+                  </button>
+                </div>
+              </div>
+
+              <div id="host-aadhaar-otp-box" class="hidden space-y-2 pt-2 border-t border-slate-700">
+                <div class="flex justify-between items-center text-[11px] text-slate-400">
+                  <span>Enter OTP sent to registered mobile</span>
+                  <span id="host-mock-otp-hint" class="font-mono-code text-cyan-400 font-bold"></span>
+                </div>
+                <div class="flex gap-2">
+                  <input type="text" id="host-aadhaar-otp-input" maxlength="6" placeholder="6-digit OTP" class="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white font-mono-code">
+                  <button type="button" onclick="verifyHostAadhaarOtp()" class="text-xs font-semibold px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
+                    Verify
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <button type="submit" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-3 rounded-xl transition shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2">
+              <i class="fa-solid fa-circle-check"></i> Complete Verification & Publish Bay
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- MODAL: ACCOUNT CREATION -->
+  <div id="account-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl relative">
+      <div class="flex justify-between items-start pb-3 border-b border-slate-800 mb-4">
+        <div>
+          <h3 class="text-sm font-bold text-white">Create ParkShare ID</h3>
+          <p class="text-xs text-slate-400">Verify your Indian 10-digit mobile number</p>
+        </div>
+        <button onclick="closeCreateAccountModal()" class="text-slate-500 hover:text-slate-300">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <div id="acc-step-1" class="space-y-3.5">
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Full Legal Name</label>
+          <input type="text" id="acc-name" placeholder="e.g., Arjun Rao" required class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">10-Digit Mobile Number (India)</label>
+          <div class="flex">
+            <span class="inline-flex items-center px-3 text-xs text-slate-400 bg-slate-800 border border-r-0 border-slate-700 rounded-l-xl font-mono-code">+91</span>
+            <input type="tel" id="acc-phone" maxlength="10" placeholder="9876543210" class="w-full text-xs px-3 py-2.5 rounded-r-xl border border-slate-700 bg-slate-800 text-white font-mono-code focus:outline-none focus:border-indigo-500">
+          </div>
+          <span class="text-[10px] text-slate-500 mt-1 block">Starts with 6, 7, 8, or 9</span>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Email ID</label>
+          <input type="email" id="acc-email" placeholder="name@domain.com" class="w-full text-xs px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <button onclick="handleSendAccountOtp()" class="w-full bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs py-3 rounded-xl transition shadow-lg shadow-indigo-600/25 flex items-center justify-center gap-2">
+          <span>Send Verification OTP</span>
+          <i class="fa-solid fa-arrow-right text-[10px]"></i>
+        </button>
+      </div>
+
+      <div id="acc-step-2" class="space-y-4 hidden">
+        <div class="p-3 bg-indigo-500/10 border border-indigo-500/30 rounded-xl text-center">
+          <span class="text-[11px] text-slate-400">OTP dispatched to:</span>
+          <div id="acc-sent-display" class="font-mono-code font-bold text-xs text-indigo-300 mt-0.5"></div>
+          <div class="mt-2 text-[10px] text-cyan-300 bg-slate-800 py-1 px-2 rounded-lg font-mono-code inline-block border border-cyan-500/20">
+            Auto-Generated Code: <strong id="mock-acc-otp">123456</strong>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Enter 6-Digit OTP</label>
+          <input type="text" id="acc-otp-input" maxlength="6" placeholder="6-digit code" class="w-full text-center tracking-widest font-mono-code text-base px-3.5 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:outline-none focus:border-indigo-500">
+        </div>
+
+        <button onclick="handleVerifyAccountOtp()" class="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs py-3 rounded-xl transition shadow-lg shadow-emerald-600/25">
+          Verify & Continue
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: DRIVER RESERVATION -->
+  <div id="booking-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md z-50 flex items-center justify-center hidden p-4 overflow-y-auto">
+    <div class="bg-slate-900 border border-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl my-8">
+      <div class="flex justify-between items-start pb-3 border-b border-slate-800 mb-4">
+        <div>
+          <h3 class="text-sm font-bold text-white" id="modal-spot-id">Reserve Bay</h3>
+          <p class="text-xs text-slate-400" id="modal-spot-address"></p>
+        </div>
+        <button onclick="closeBookingModal()" class="text-slate-500 hover:text-slate-300">
+          <i class="fa-solid fa-xmark text-sm"></i>
+        </button>
+      </div>
+
+      <form id="reservation-form" onsubmit="handleConfirmBooking(event)" class="space-y-4">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Reservation Start Time</label>
+            <input type="datetime-local" id="booking-start-time" required onchange="calcModalTotal()" class="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:border-indigo-500">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">Duration</label>
+            <select id="booking-duration" onchange="calcModalTotal()" class="w-full text-xs px-3 py-2.5 rounded-xl border border-slate-700 bg-slate-800 text-white focus:border-indigo-500">
+              <option value="1">1 Hour</option>
+              <option value="2" selected>2 Hours</option>
+              <option value="3">3 Hours</option>
+              <option value="4">4 Hours</option>
+              <option value="8">8 Hours (Full Day)</option>
+            </select>
+          </div>
+        </div>
+
+        <div id="modal-wash-section">
+          <label class="block text-xs font-semibold text-slate-300 mb-1">Host Detailing Services</label>
+          <div class="space-y-2">
+            <label class="flex items-center justify-between p-2.5 rounded-xl border border-slate-800 bg-slate-800/40 text-xs cursor-pointer hover:bg-slate-800">
+              <span class="flex items-center gap-2">
+                <input type="radio" name="modal-cleaning" value="NONE" checked onchange="calcModalTotal()" class="accent-indigo-500">
+                <span class="text-slate-300">Parking Space Only</span>
+              </span>
+              <span class="font-mono-code text-slate-400">₹0</span>
+            </label>
+            <label id="modal-wash-option" class="flex items-center justify-between p-2.5 rounded-xl border border-slate-800 bg-slate-800/40 text-xs cursor-pointer hover:bg-slate-800">
+              <span class="flex items-center gap-2">
+                <input type="radio" name="modal-cleaning" value="WASH" onchange="calcModalTotal()" class="accent-indigo-500">
+                <span class="text-slate-300">Doorstep Foam Wash & Detailing</span>
+              </span>
+              <span class="font-mono-code text-emerald-400 font-bold">+₹199</span>
+            </label>
+          </div>
+        </div>
+
+        <div class="p-3.5 bg-slate-800/60 border border-slate-700/80 rounded-2xl space-y-3">
+          <div class="flex items-center justify-between">
+            <span class="text-xs font-bold text-white flex items-center gap-1.5">
+              <i class="fa-solid fa-address-card text-indigo-400"></i> Driver e-KYC Verification
+            </span>
+            <span id="driver-aadhaar-badge" class="text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2 py-0.5 rounded">OTP Required</span>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">Driving License (DL) Number</label>
+            <input type="text" id="driver-dl" placeholder="e.g., DL-1420110012345" required class="w-full text-xs px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white font-mono-code uppercase">
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">12-Digit Aadhaar Number</label>
+            <div class="flex gap-2">
+              <input type="text" id="driver-aadhaar" pattern="[0-9]{12}" maxlength="12" placeholder="12 Digit Aadhaar" required class="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white font-mono-code">
+              <button type="button" onclick="sendDriverAadhaarOtp()" id="btn-driver-aadhaar-otp" class="text-xs font-semibold px-3 py-2 bg-indigo-500/20 border border-indigo-500/40 text-indigo-300 rounded-xl hover:bg-indigo-500/30 whitespace-nowrap">
+                Send OTP
+              </button>
+            </div>
+          </div>
+
+          <div id="driver-aadhaar-otp-box" class="hidden space-y-2 pt-2 border-t border-slate-700">
+            <div class="flex justify-between items-center text-[11px] text-slate-400">
+              <span>Enter Aadhaar OTP</span>
+              <span id="driver-mock-otp-hint" class="font-mono-code text-cyan-400 font-bold"></span>
+            </div>
+            <div class="flex gap-2">
+              <input type="text" id="driver-aadhaar-otp" maxlength="6" placeholder="6-digit OTP" class="flex-1 text-xs px-3 py-2 rounded-xl border border-slate-700 bg-slate-900 text-white font-mono-code">
+              <button type="button" onclick="verifyDriverAadhaarOtp()" class="text-xs font-semibold px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl">
+                Verify
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="p-3.5 bg-indigo-950/30 rounded-2xl border border-indigo-500/20 space-y-2 text-xs">
+          <div class="flex justify-between text-slate-400">
+            <span>Total Slot Charges (<span id="calc-hours">2</span> hrs + services):</span>
+            <span class="font-mono-code font-semibold text-slate-200" id="calc-total-val">₹0</span>
+          </div>
+          <div class="border-t border-indigo-500/20 pt-2 flex justify-between items-center text-white">
+            <div>
+              <span class="font-bold text-indigo-400 block text-sm">Advance Payable Now (25%):</span>
+              <span class="text-[10px] text-slate-400">Guarantees your empty slot</span>
+            </div>
+            <span class="font-mono-code text-base font-bold text-indigo-300" id="calc-advance-val">₹0</span>
+          </div>
+          <div class="flex justify-between items-center text-[11px] text-slate-400 pt-1">
+            <span>Remaining 75% Due At Bay Check-in:</span>
+            <span class="font-mono-code font-medium text-slate-300" id="calc-remaining-val">₹0</span>
+          </div>
+        </div>
+
+        <button type="submit" class="w-full bg-gradient-to-r from-indigo-600 to-indigo-500 hover:from-indigo-500 hover:to-indigo-400 text-white font-semibold text-xs py-3.5 rounded-xl transition shadow-lg shadow-indigo-600/30 flex items-center justify-center gap-2">
+          <i class="fa-solid fa-lock"></i> Authorize 25% Advance & Reserve Bay
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    const spotsData = [
+      { id: "BAY-101", ownerPhone: "9876543210", address: "12, 100ft Road, Indiranagar", area: "Indiranagar", pincode: "560038", lat: 12.9784, lng: 77.6408, timeWindow: "08:00 - 22:00", hasWash: true, type: "Covered Garage", rate: 50, ownerAadhaar: "[Aadhaar Redacted]", verified: true, status: "AVAILABLE" },
+      { id: "BAY-102", ownerPhone: "9876543210", address: "Plot 8, 4th Block, Koramangala", area: "Koramangala", pincode: "560034", lat: 12.9352, lng: 77.6245, timeWindow: "07:00 - 23:00", hasWash: true, type: "Open Driveway", rate: 60, ownerAadhaar: "[Aadhaar Redacted]", verified: true, status: "AVAILABLE" },
+      { id: "BAY-103", ownerPhone: "9988776655", address: "Sector 29 Leisure Valley Stilt", area: "Sector 29", pincode: "122001", lat: 28.4682, lng: 77.0620, timeWindow: "09:00 - 20:00", hasWash: false, type: "Basement Stilt", rate: 40, ownerAadhaar: "[Aadhaar Redacted]", verified: true, status: "AVAILABLE" },
+      { id: "BAY-104", ownerPhone: "9876543210", address: "Prestige Bay, ITPL Main Road, Whitefield", area: "Whitefield", pincode: "560066", lat: 12.9863, lng: 77.7342, timeWindow: "06:00 - 22:00", hasWash: true, type: "Covered Garage", rate: 70, ownerAadhaar: "[Aadhaar Redacted]", verified: true, status: "AVAILABLE" }
+    ];
+
+    const bookingsData = [];
+    let selectedSpot = null;
+    let currentUser = null;
+    let activeRole = null;
+    let currentAccOtp = null;
+    let driverCoords = null;
+    let driverMap = null;
+    let driverMarkers = [];
+    let hostMap = null;
+    let hostMarker = null;
+    let driverAadhaarVerified = false;
+    let driverAadhaarOtpCode = null;
+    let hostAadhaarVerified = false;
+    let hostAadhaarOtpCode = null;
+
+    function openCreateAccountModal() {
+      document.getElementById('acc-step-1').classList.remove('hidden');
+      document.getElementById('acc-step-2').classList.add('hidden');
+      document.getElementById('acc-name').value = '';
+      document.getElementById('acc-phone').value = '';
+      document.getElementById('acc-email').value = '';
+      document.getElementById('acc-otp-input').value = '';
+      document.getElementById('account-modal').classList.remove('hidden');
+    }
+
+    function closeCreateAccountModal() {
+      document.getElementById('account-modal').classList.add('hidden');
+    }
+
+    function handleSendAccountOtp() {
+      const name = document.getElementById('acc-name').value.trim();
+      const phone = document.getElementById('acc-phone').value.trim();
+      const email = document.getElementById('acc-email').value.trim();
+
+      if (!name) { alert("Please enter your legal name."); return; }
+      if (!/^[6-9]\d{9}$/.test(phone)) { alert("Please enter a valid 10-digit Indian mobile number."); return; }
+
+      currentAccOtp = Math.floor(100000 + Math.random() * 900000).toString();
+      document.getElementById('acc-sent-display').innerText = `+91 ${phone}${email ? ' & ' + email : ''}`;
+      document.getElementById('mock-acc-otp').innerText = currentAccOtp;
+      document.getElementById('acc-otp-input').value = currentAccOtp;
+
+      document.getElementById('acc-step-1').classList.add('hidden');
+      document.getElementById('acc-step-2').classList.remove('hidden');
+    }
+
+    function handleVerifyAccountOtp() {
+      if (document.getElementById('acc-otp-input').value.trim() !== currentAccOtp) {
+        alert("Invalid OTP code."); return;
+      }
+      currentUser = {
+        name: document.getElementById('acc-name').value.trim(),
+        phone: document.getElementById('acc-phone').value.trim(),
+        email: document.getElementById('acc-email').value.trim()
+      };
+      closeCreateAccountModal();
+      document.getElementById('welcome-username').innerText = currentUser.name.split(' ')[0];
+      document.getElementById('stage-welcome').classList.add('hidden');
+      document.getElementById('stage-role-select').classList.remove('hidden');
+    }
+
+    function selectRole(role) {
+      activeRole = role;
+      document.getElementById('stage-role-select').classList.add('hidden');
+      document.getElementById('app-header').classList.remove('hidden');
+      document.getElementById('header-user-name').innerHTML = `<span>${currentUser.name.split(' ')[0]}</span><span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>`;
+      document.getElementById('header-user-contact').innerText = `+91 ${currentUser.phone}`;
+
+      const portalNav = document.getElementById('portal-nav-tabs');
+      const roleBadge = document.getElementById('header-role-badge');
+
+      if (role === 'driver') {
+        roleBadge.innerText = "Vehicle Owner Mode";
+        roleBadge.className = "text-[10px] uppercase font-bold tracking-wider text-emerald-400 block leading-none mt-0.5";
+        portalNav.innerHTML = `
+          <button onclick="switchDriverTab('find')" id="dtab-find" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition">
+            <i class="fa-solid fa-magnifying-glass mr-1.5 text-indigo-200"></i>Find Bay
+          </button>
+          <button onclick="switchDriverTab('bookings')" id="dtab-bookings" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">
+            <i class="fa-solid fa-ticket mr-1.5 text-amber-400"></i>My Bookings
+          </button>
+        `;
+        document.getElementById('stage-driver-portal').classList.remove('hidden');
+        document.getElementById('stage-host-portal').classList.add('hidden');
+        switchDriverTab('find');
+        setTimeout(initDriverMap, 200);
+      } else {
+        roleBadge.innerText = "Slot Owner Mode";
+        roleBadge.className = "text-[10px] uppercase font-bold tracking-wider text-indigo-400 block leading-none mt-0.5";
+        portalNav.innerHTML = `
+          <button onclick="switchHostTab('dashboard')" id="htab-dashboard" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition">
+            <i class="fa-solid fa-table-list mr-1.5 text-indigo-200"></i>Bay Bookings
+          </button>
+          <button onclick="switchHostTab('register')" id="htab-register" class="px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition">
+            <i class="fa-solid fa-plus mr-1.5 text-emerald-400"></i>List New Bay
+          </button>
+        `;
+        document.getElementById('stage-host-portal').classList.remove('hidden');
+        document.getElementById('stage-driver-portal').classList.add('hidden');
+        switchHostTab('dashboard');
+      }
+    }
+
+    function handleSignOut() {
+      activeRole = null;
+      driverAadhaarVerified = false;
+      hostAadhaarVerified = false;
+      document.getElementById('app-header').classList.add('hidden');
+      document.getElementById('stage-driver-portal').classList.add('hidden');
+      document.getElementById('stage-host-portal').classList.add('hidden');
+      if (currentUser) {
+        document.getElementById('stage-role-select').classList.remove('hidden');
+      } else {
+        document.getElementById('stage-welcome').classList.remove('hidden');
+      }
+    }
+
+    function calcDistanceKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon/2) * Math.sin(dLon/2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+      return (R * c).toFixed(1);
+    }
+
+    function initDriverMap() {
+      if (driverMap) { driverMap.invalidateSize(); return; }
+      driverMap = L.map('driver-map').setView([12.9716, 77.5946], 12);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        maxZoom: 19,
+        attribution: '© OpenStreetMap'
+      }).addTo(driverMap);
+      renderDriverMapPins(spotsData);
+    }
+
+    function renderDriverMapPins(spots) {
+      if (!driverMap) return;
+      driverMarkers.forEach(m => driverMap.removeLayer(m));
+      driverMarkers = [];
+      spots.forEach(s => {
+        const marker = L.marker([s.lat, s.lng]).addTo(driverMap);
+        marker.bindPopup(`
+          <div style="font-family: 'Plus Jakarta Sans', sans-serif; color: #0f172a; min-width: 160px;">
+            <strong style="font-size: 13px; color: #4338ca;">${s.id}</strong><br>
+            <span style="font-size: 11px;">${s.address}</span><br>
+            <strong style="font-size: 12px;">₹${s.rate}/hr</strong> (25% adv: ₹${Math.round(s.rate*0.25)})<br>
+            <button onclick="openBookingModal('${s.id}')" style="margin-top: 6px; width: 100%; background: #4f46e5; color: white; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: bold; border: none; cursor: pointer;">
+              Book Bay
+            </button>
+          </div>
+        `);
+        driverMarkers.push(marker);
+      });
+    }
+
+    function locateDriverNearest() {
+      if (!navigator.geolocation) { alert("Geolocation not supported."); return; }
+      document.getElementById('map-status-label').innerText = "Locating via Satellite GPS...";
+      navigator.geolocation.getCurrentPosition(pos => {
+        const lat = pos.coords.latitude;
+        const lng = pos.coords.longitude;
+        driverCoords = { lat, lng };
+        if (driverMap) {
+          driverMap.setView([lat, lng], 14);
+          L.circle([lat, lng], { radius: 1000, color: '#10b981', fillColor: '#10b981', fillOpacity: 0.15 }).addTo(driverMap);
+          L.marker([lat, lng], {
+            icon: L.divIcon({
+              className: 'custom-div-icon',
+              html: "<div style='background-color:#10b981; width:16px; height:16px; border-radius:50%; border:3px solid white; box-shadow: 0 0 10px #10b981;'></div>",
+              iconSize: [16, 16],
+              iconAnchor: [8, 8]
+            })
+          }).addTo(driverMap).bindPopup("<b>You Are Here</b>").openPopup();
+        }
+        const sorted = [...spotsData].map(s => ({ ...s, distance: calcDistanceKm(lat, lng, s.lat, s.lng) }))
+                                     .sort((a, b) => parseFloat(a.distance) - parseFloat(b.distance));
+        document.getElementById('map-status-label').innerText = `Nearest bay is ${sorted[0].id} (${sorted[0].distance} km away)`;
+        renderSpots(sorted);
+      }, () => {
+        alert("GPS unavailable. Defaulting to city center.");
+        driverCoords = { lat: 12.9716, lng: 77.5946 };
+        if (driverMap) driverMap.setView([12.9716, 77.5946], 12);
+        document.getElementById('map-status-label').innerText = "City Center Lock Active";
+      });
+    }
+
+    function initHostMap() {
+      if (hostMap) { hostMap.invalidateSize(); return; }
+      hostMap = L.map('host-map').setView([12.9716, 77.5946], 13);
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(hostMap);
+      hostMarker = L.marker([12.9716, 77.5946], { draggable: true }).addTo(hostMap);
+      hostMap.on('click', e => {
+        hostMarker.setLatLng(e.latlng);
+        document.getElementById('bay-lat').value = e.latlng.lat.toFixed(4);
+        document.getElementById('bay-lng').value = e.latlng.lng.toFixed(4);
+        document.getElementById('host-coords-label').innerText = `Pinned: ${e.latlng.lat.toFixed(4)}, ${e.latlng.lng.toFixed(4)}`;
+      });
+      hostMarker.on('dragend', () => {
+        const pt = hostMarker.getLatLng();
+        document.getElementById('bay-lat').value = pt.lat.toFixed(4);
+        document.getElementById('bay-lng').value = pt.lng.toFixed(4);
+        document.getElementById('host-coords-label').innerText = `Pinned: ${pt.lat.toFixed(4)}, ${pt.lng.toFixed(4)}`;
+      });
+    }
+
+    function openInGoogleMaps(lat, lng, address) {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}&destination_place_id=${encodeURIComponent(address)}`, '_blank');
+    }
+
+    function switchDriverTab(tab) {
+      if (tab === 'find') {
+        document.getElementById('driver-tab-find').classList.remove('hidden');
+        document.getElementById('driver-tab-bookings').classList.add('hidden');
+        document.getElementById('dtab-find').className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition";
+        document.getElementById('dtab-bookings').className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition";
+        applyFilters();
+      } else {
+        document.getElementById('driver-tab-find').classList.add('hidden');
+        document.getElementById('driver-tab-bookings').classList.remove('hidden');
+        document.getElementById('dtab-bookings').className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm transition";
+        document.getElementById('dtab-find').className = "px-3.5 py-1.5 text-xs font-semibold rounded-lg text-slate-400 hover:text-white transition";
+        renderDriverBookings();
+      }
+    }
+
+    function applyFilters() {
+      const selectedArea = document.getElementById('filter-area').value;
+      const pincodeQuery = document.getElementById('filter-pincode').value.trim();
+      const filtered = spotsData.filter(s => {
+        const matchesArea = (selectedArea === "ALL") || (s.area.toLowerCase() === selectedArea.toLowerCase());
+        const matchesPincode = !pincodeQuery || s.pincode.startsWith(pincodeQuery);
+        return matchesArea && matchesPincode;
+      });
+      renderSpots(filtered);
+      renderDriverMapPins(filtered);
+    }
+
+    function resetFilters() {
+      document.getElementById('filter-area').value = "ALL";
+      document.getElementById('filter-pincode').value = "";
+      renderSpots(spotsData);
+      renderDriverMapPins(spotsData);
+    }
+
+    function setDefaultSlotTime() {
+      const now = new Date();
+      now.setHours(now.getHours() + 1);
+      now.setMinutes(0, 0, 0);
+      const isoString = new Date(now.getTime() - now.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+      document.getElementById('booking-start-time').value = isoString;
+      document.getElementById('booking-start-time').min = isoString;
+    }
+
+    function renderSpots(spotsToRender = spotsData) {
+      const grid = document.getElementById('spots-grid');
+      if (spotsToRender.length === 0) {
+        grid.innerHTML = `<div class="col-span-full bg-slate-900/60 border border-slate-800 rounded-3xl p-8 text-center text-slate-500"><p class="text-xs font-medium">No verified parking bays match your search.</p></div>`;
+        return;
+      }
+      grid.innerHTML = spotsToRender.map(s => `
+        <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between hover:border-slate-700 transition">
+          <div>
+            <div class="flex justify-between items-start mb-2">
+              <span class="font-mono-code text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-800 text-indigo-300 border border-indigo-500/20">${s.id}</span>
+              <div class="flex items-center gap-1.5">
+                ${s.distance ? `<span class="text-[10px] font-mono-code text-cyan-400 bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">${s.distance} km</span>` : ''}
+                <span class="text-[10px] font-semibold px-2 py-0.5 rounded-full ${s.status === 'AVAILABLE' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30' : 'bg-rose-500/10 text-rose-400 border border-rose-500/30'}">${s.status}</span>
+              </div>
+            </div>
+            <h3 class="text-sm font-bold text-white mt-1">${s.address}</h3>
+            <p class="text-xs text-slate-400 mt-0.5">${s.type} • <span class="font-mono-code text-slate-300 font-medium">PIN: ${s.pincode}</span></p>
+            <div class="mt-3 space-y-1.5 text-[11px]">
+              <div class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-clock text-indigo-400"></i> Free Hours: <span class="font-mono-code text-slate-200">${s.timeWindow}</span></div>
+              <div class="text-slate-400 flex items-center gap-1.5"><i class="fa-solid fa-soap ${s.hasWash ? 'text-emerald-400' : 'text-slate-600'}"></i> Detailing: <span class="${s.hasWash ? 'text-emerald-400 font-semibold' : 'text-slate-500'}">${s.hasWash ? 'Available (+₹199)' : 'Not offered'}</span></div>
+              <div class="inline-flex items-center gap-1.5 text-emerald-400 bg-emerald-500/10 px-2.5 py-0.5 rounded border border-emerald-500/30"><i class="fa-solid fa-shield-check text-[11px]"></i> Host e-KYC Verified</div>
+            </div>
+          </div>
+          <div class="mt-5 pt-3 border-t border-slate-800 flex items-center justify-between">
+            <div>
+              <span class="text-base font-bold text-white font-mono-code">₹${s.rate}<span class="text-xs font-normal text-slate-400">/hr</span></span>
+              <span class="block text-[10px] text-indigo-400 font-semibold font-mono-code">25% Adv: ₹${Math.round(s.rate * 0.25)}/hr</span>
+            </div>
+            <div class="flex gap-2">
+              <button onclick="openInGoogleMaps(${s.lat}, ${s.lng}, '${s.address}')" class="px-2.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs transition" title="Open in Google Maps"><i class="fa-solid fa-diamond-turn-right text-cyan-400"></i></button>
+              <button onclick="openBookingModal('${s.id}')" ${s.status !== 'AVAILABLE' ? 'disabled class="opacity-40 cursor-not-allowed bg-slate-800 text-slate-500 text-xs px-3.5 py-2 rounded-xl"' : 'class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-4 py-2 rounded-xl transition shadow-md shadow-indigo-600/20"'}>Book Slot</button>
+            </div>
+          </div>
+        </div>
+      `).join('');
+    }
+
+    function openBookingModal(spotId) {
+      selectedSpot = spotsData.find(s => s.id === spotId);
+      document.getElementById('modal-spot-id').innerText = `Reserve Slot: ${selectedSpot.id}`;
+      document.getElementById('modal-spot-address').innerText = `${selectedSpot.address} (PIN: ${selectedSpot.pincode})`;
+      const washOpt = document.getElementById('modal-wash-option');
+      if (selectedSpot.hasWash) { washOpt.classList.remove('hidden'); }
+      else { washOpt.classList.add('hidden'); document.querySelector('input[name="modal-cleaning"][value="NONE"]').checked = true; }
+      setDefaultSlotTime();
+      calcModalTotal();
+      document.getElementById('booking-modal').classList.remove('hidden');
+    }
+
+    function closeBookingModal() { document.getElementById('booking-modal').classList.add('hidden'); }
+
+    function calcModalTotal() {
+      if (!selectedSpot) return;
+      const hours = parseInt(document.getElementById('booking-duration').value);
+      const cleaning = document.querySelector('input[name="modal-cleaning"]:checked').value;
+      const totalAmount = (hours * selectedSpot.rate) + (cleaning === 'WASH' ? 199 : 0);
+      const advancePayable = Math.round(totalAmount * 0.25);
+      document.getElementById('calc-hours').innerText = hours;
+      document.getElementById('calc-total-val').innerText = `₹${totalAmount}`;
+      document.getElementById('calc-advance-val').innerText = `₹${advancePayable}`;
+      document.getElementById('calc-remaining-val').innerText = `₹${totalAmount - advancePayable}`;
+    }
+
+    function sendDriverAadhaarOtp() {
+      const aadhaar = document.getElementById('driver-aadhaar').value.trim();
+      if (!aadhaar || aadhaar.length !== 12 || isNaN(aadhaar)) { alert("Enter a valid 12-digit Aadhaar number."); return; }
+      driverAadhaarOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      document.getElementById('driver-mock-otp-hint').innerText = `OTP: ${driverAadhaarOtpCode}`;
+      document.getElementById('driver-aadhaar-otp').value = driverAadhaarOtpCode;
+      document.getElementById('driver-aadhaar-otp-box').classList.remove('hidden');
+    }
+
+    function verifyDriverAadhaarOtp() {
+      if (document.getElementById('driver-aadhaar-otp').value.trim() === driverAadhaarOtpCode) {
+        driverAadhaarVerified = true;
+        const badge = document.getElementById('driver-aadhaar-badge');
+        badge.className = "text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded";
+        badge.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Verified';
+        document.getElementById('btn-driver-aadhaar-otp').classList.add('hidden');
+        document.getElementById('driver-aadhaar-otp-box').classList.add('hidden');
+        document.getElementById('driver-aadhaar').readOnly = true;
+      } else { alert("Invalid OTP."); }
+    }
+
+    function handleConfirmBooking(e) {
+      e.preventDefault();
+      if (!driverAadhaarVerified) { alert("Please verify Aadhaar via OTP first."); return; }
+      const startTimeVal = document.getElementById('booking-start-time').value;
+      const hours = parseInt(document.getElementById('booking-duration').value);
+      const driverDl = document.getElementById('driver-dl').value.trim();
+      const cleaning = document.querySelector('input[name="modal-cleaning"]:checked').value;
+      const start = new Date(startTimeVal);
+      const end = new Date(start.getTime() + hours * 3600000);
+      const totalAmount = (hours * selectedSpot.rate) + (cleaning === 'WASH' ? 199 : 0);
+      const advancePaid = Math.round(totalAmount * 0.25);
+
+      bookingsData.unshift({
+        bookingId: "BK-" + Math.floor(1000 + Math.random() * 9000),
+        spotId: selectedSpot.id,
+        address: selectedSpot.address,
+        area: selectedSpot.area,
+        pincode: selectedSpot.pincode,
+        lat: selectedSpot.lat,
+        lng: selectedSpot.lng,
+        createdAt: new Date(),
+        startTime: start,
+        endTime: end,
+        duration: hours,
+        totalAmount: totalAmount,
+        advancePaid: advancePaid,
+        balanceDue: totalAmount - advancePaid,
+        driverName: currentUser.name,
+        driverPhone: currentUser.phone,
+        driverAadhaar: "[Aadhaar Redacted]",
+        driverDl: driverDl,
+        status: "CONFIRMED"
+      });
+      selectedSpot.status = "RESERVED";
+      applyFilters();
+      closeBookingModal();
+      switchDriverTab('bookings');
+    }
+
+    function evaluateCancellation(booking) {
+      const now = new Date();
+      const minsSinceBooking = (now - new Date(booking.createdAt)) / 60000;
+      const hoursUntilSlot = (new Date(booking.startTime) - now) / 3600000;
+      if (minsSinceBooking > 45 || hoursUntilSlot < 1) {
+        return { hasFee: true, fee: booking.advancePaid };
+      }
+      return { hasFee: false, fee: 0 };
+    }
+
+    function cancelBooking(bookingId) {
+      const booking = bookingsData.find(b => b.bookingId === bookingId);
+      if (!booking || booking.status !== "CONFIRMED") return;
+      const evalResult = evaluateCancellation(booking);
+      if (confirm(`Cancel booking ${booking.bookingId}?`)) {
+        booking.status = "CANCELLED";
+        booking.cancellationFee = evalResult.fee;
+        booking.refundAmount = booking.advancePaid - evalResult.fee;
+        const spot = spotsData.find(s => s.id === booking.spotId);
+        if (spot) spot.status = "AVAILABLE";
+        applyFilters();
+        renderDriverBookings();
+      }
+    }
+
+    function renderDriverBookings() {
+      const container = document.getElementById('driver-bookings-list');
+      const myBookings = bookingsData.filter(b => b.driverPhone === currentUser.phone);
+      if (myBookings.length === 0) {
+        container.innerHTML = `<div class="bg-slate-900/80 border border-slate-800 rounded-3xl p-8 text-center text-slate-500"><p class="text-xs">No active reservations found.</p></div>`;
+        return;
+      }
+      container.innerHTML = myBookings.map(b => {
+        const canCancel = b.status === 'CONFIRMED';
+        const evalResult = canCancel ? evaluateCancellation(b) : null;
+        return `
+          <div class="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-3">
+            <div class="flex justify-between items-start">
+              <div>
+                <span class="font-mono-code text-xs font-bold text-white">${b.bookingId}</span>
+                <span class="text-[10px] font-bold px-2 py-0.5 rounded-full ml-2 ${b.status === 'CONFIRMED' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-slate-800 text-slate-500'}">${b.status}</span>
+                <h4 class="text-xs font-semibold text-slate-200 mt-1">${b.address} (${b.spotId})</h4>
+              </div>
+              <div class="text-right">
+                <span class="font-mono-code text-sm font-bold text-white block">₹${b.advancePaid} (25% Paid)</span>
+                ${b.status === 'CONFIRMED' ? `<span class="text-[11px] font-mono-code text-amber-400">₹${b.balanceDue} due at bay</span>` : ''}
+              </div>
+            </div>
+            <div class="flex items-center justify-between pt-1">
+              <button onclick="openInGoogleMaps(${b.lat}, ${b.lng}, '${b.address}')" class="px-3 py-1.5 rounded-lg bg-indigo-600/20 text-indigo-300 text-xs font-semibold">Open Google Maps</button>
+              ${canCancel ? `<button onclick="cancelBooking('${b.bookingId}')" class="px-3 py-1.5 rounded-xl border border-rose-500/30 text-rose-400 text-xs font-semibold">Cancel</button>` : `<span class="text-slate-500 text-xs">Closed</span>`}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function switchHostTab(tab) {
+      if (tab === 'dashboard') {
+        document.getElementById('host-tab-dashboard').classList.remove('hidden');
+        document.getElementById('host-tab-register').classList.add('hidden');
+        renderHostDashboard();
+      } else {
+        document.getElementById('host-tab-dashboard').classList.add('hidden');
+        document.getElementById('host-tab-register').classList.remove('hidden');
+        setTimeout(initHostMap, 200);
+      }
+    }
+
+    function sendHostAadhaarOtp() {
+      const aadhaar = document.getElementById('host-aadhaar-num').value.trim();
+      if (!aadhaar || aadhaar.length !== 12 || isNaN(aadhaar)) { alert("Enter a valid 12-digit Aadhaar number."); return; }
+      hostAadhaarOtpCode = Math.floor(100000 + Math.random() * 900000).toString();
+      document.getElementById('host-mock-otp-hint').innerText = `OTP: ${hostAadhaarOtpCode}`;
+      document.getElementById('host-aadhaar-otp-input').value = hostAadhaarOtpCode;
+      document.getElementById('host-aadhaar-otp-box').classList.remove('hidden');
+    }
+
+    function verifyHostAadhaarOtp() {
+      if (document.getElementById('host-aadhaar-otp-input').value.trim() === hostAadhaarOtpCode) {
+        hostAadhaarVerified = true;
+        const badge = document.getElementById('host-aadhaar-badge');
+        badge.className = "text-[10px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 px-2 py-0.5 rounded";
+        badge.innerHTML = '<i class="fa-solid fa-check mr-1"></i>Verified';
+        document.getElementById('btn-host-aadhaar-otp').classList.add('hidden');
+        document.getElementById('host-aadhaar-otp-box').classList.add('hidden');
+        document.getElementById('host-aadhaar-num').readOnly = true;
+      } else { alert("Invalid OTP."); }
+    }
+
+    function handleCreateSpot(e) {
+      e.preventDefault();
+      if (!hostAadhaarVerified) { alert("Complete Owner e-KYC first."); return; }
+      spotsData.push({
+        id: document.getElementById('bay-code').value.trim(),
+        ownerPhone: currentUser.phone,
+        address: document.getElementById('bay-address').value.trim(),
+        area: document.getElementById('bay-area').value.trim(),
+        pincode: document.getElementById('bay-pincode').value.trim(),
+        lat: parseFloat(document.getElementById('bay-lat').value),
+        lng: parseFloat(document.getElementById('bay-lng').value),
+        timeWindow: `${document.getElementById('bay-time-from').value} - ${document.getElementById('bay-time-to').value}`,
+        hasWash: document.getElementById('bay-has-wash').checked,
+        rate: parseFloat(document.getElementById('bay-rate').value),
+        type: document.getElementById('bay-type').value,
+        ownerAadhaar: "[Aadhaar Redacted]",
+        verified: true,
+        status: "AVAILABLE"
+      });
+      document.getElementById('host-bay-form').reset();
+      hostAadhaarVerified = false;
+      switchHostTab('dashboard');
+    }
+
+    function renderHostDashboard() {
+      const myBays = spotsData.filter(s => s.ownerPhone === currentUser.phone);
+      const myBayIds = myBays.map(s => s.id);
+      const myBookings = bookingsData.filter(b => myBayIds.includes(b.spotId));
+      document.getElementById('stat-bays-count').innerText = myBays.length;
+      document.getElementById('stat-bookings-count').innerText = myBookings.length;
+      const totalAdvance = myBookings.reduce((sum, b) => sum + (b.status !== 'CANCELLED' ? b.advancePaid : 0), 0);
+      document.getElementById('stat-revenue').innerText = `₹${totalAdvance}`;
+
+      const container = document.getElementById('host-bookings-table');
+      if (myBookings.length === 0) {
+        container.innerHTML = `<div class="p-8 text-center text-slate-500 text-xs">No incoming reservations yet.</div>`;
+        return;
+      }
+      container.innerHTML = myBookings.map(b => `
+        <div class="border border-slate-800 bg-slate-800/40 rounded-2xl p-4 flex justify-between items-center">
+          <div>
+            <span class="font-mono-code font-bold text-xs text-indigo-400">${b.spotId}</span> • <span class="font-mono-code text-xs text-white">${b.bookingId}</span>
+            <div class="text-xs text-slate-300 mt-1">Guest: <strong>${b.driverName}</strong> (+91 ${b.driverPhone})</div>
+          </div>
+          <div class="text-right">
+            <span class="text-xs text-emerald-400 font-bold block font-mono-code">25% Settled: ₹${b.advancePaid}</span>
+            <span class="text-[11px] text-amber-400 font-semibold block font-mono-code">Due: ₹${b.balanceDue}</span>
+          </div>
+        </div>
+      `).join('');
+    }
+  </script>
+</body>
+</html>
